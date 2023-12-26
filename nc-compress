@@ -1,0 +1,73 @@
+#!/bin/bash
+
+##
+## FOLDER CONFIG -------------------------------------------------------------
+##
+
+BACKUP_BASE_DIR=/your/backup/directory
+NEXTCLOUD_DIR=/var/www/your.nextcloud.instance
+NEXTCLOUD_DATA_DIR=/var/www/your.nextcloud.instance/data
+
+######################################################### END OF FOLDER CONFIG
+
+NEXTCLOUD_USER=$1
+
+if [ "$1" = 'help' ] || [ -z $1 ]; then
+  echo ""
+  echo "USAGE"
+  echo "   nc-compress <nextcloud-username> <methods>"
+  echo ""
+  echo "available <methods>"
+  echo "   rsync             : folder sync (incremental backup) to the BACKUP_BASE_DIR via rsync"
+  echo "   7z                : perform rsync and create compressed .7z backup to the subfolder _backup in BACKUP_BASE_DIR"
+  echo "  <blank>            : same as rsync"
+  echo ""
+  echo "<nextcloud-username>"
+  echo "   you can see the list of nextcloud username by run these command:"
+  echo "   occ user:list"
+  echo ""
+  echo "PS: you cannot backup the nextcloud data if your nextcloud username is 'help' anyways :-)"
+  echo ""
+  exit
+fi
+
+second_param=$2
+if [ -z $2 ]; then
+  second_param=rsync
+fi
+
+userexists=$( runuser --user www-data -- /usr/bin/php8.1 $NEXTCLOUD_DIR/occ user:info $NEXTCLOUD_USER )
+#note: change /usr/bin/php8.1 above to your installed php-cli version ---------------------------------
+
+if [ "$userexists" == 'user not found' ]; then
+  echo "Nextcloud user not found. Backup via $second_param cancelled."
+  exit
+fi
+
+if [ "$second_param" = 'rsync' ] || [ "$second_param" = '7z' ]; then
+
+  #create directories if not exists
+  mkdir -p $BACKUP_BASE_DIR/$NEXTCLOUD_USER
+
+  #rsync the nextcloud user's data to BACKUP_BASE_DIR
+  rsync -avh "$NEXTCLOUD_DATA_DIR/$NEXTCLOUD_USER/" "$BACKUP_BASE_DIR/$NEXTCLOUD_USER/"
+
+  if [ "$second_param" = '7z' ]; then
+
+    BACKUP_FOLDER=$BACKUP_BASE_DIR/_backup
+    mkdir -p $BACKUP_FOLDER
+
+    timestamp_flag=` date +%Y%m%d.%H%M%S `
+    BACKUP_FILE="$BACKUP_FOLDER/$NEXTCLOUD_USER-$timestamp_flag.7z"
+
+    #compress backup (highest compression, using 2 CPU cores)
+    7z a -mx9 -mmt2 $BACKUP_FILE "$BACKUP_BASE_DIR/$NEXTCLOUD_USER/"
+
+    # delete backup of the same user after 30 days -- disabled by default, could be useful when executed via cron daily
+    # find $BACKUP_FOLDER/$NEXTCLOUD_USER*.7z -mtime +29 | xargs -t -i rm -f {}
+
+  fi
+
+  exit 0
+
+fi
